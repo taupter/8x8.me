@@ -12,7 +12,7 @@
 #   - Bash v3.0+
 #   - ImageMagick https://imagemagick.org/
 #   - ExifTool https://exiftool.org
-#   - Oxipng v9.1.3+ https://github.com/shssoichiro/oxipng
+#   - Oxipng v10.0.0+ https://github.com/oxipng/oxipng
 #   - Optional: PNGOUT (for extra png compression)
 #
 # Assumptions:
@@ -53,12 +53,12 @@ for bin in 'magick' 'exiftool' 'oxipng'; do
     exit 1
   fi
 done
-# Check Oxipng is v9.1.3 or greater (for Zopfli iterations `--zi`)
-min_ver='9.1.3'
+# Check Oxipng is v10 or greater (for Zopfli iterations `--ziwi`)
+min_ver='10.0.0'
 this_ver="$(oxipng --version | head -n1 | sed 's/^oxipng //')"
 if [[ $(printf '%s\n' "${min_ver}" "${this_ver}" | sort -V | head -n1) \
   != "${min_ver}" ]]; then
-  echo "${ERR} Oxipng v${this_ver}; upgrade to at least v${min_ver}."
+  echo "${ERR} Oxipng v${this_ver}; upgrade to at least v${min_ver}." >&2
   exit 1
 fi
 # Check for at least one input file
@@ -171,20 +171,22 @@ function get_byte {
 
 # Lossless png optimization
 optimize_png() {
-  if [[ -f "$1" ]]; then
-    oxipng -q --nx --strip all "$1"
+  local png_file="${1:-}" reductions level
+  if [[ -f "${png_file}" ]]; then
+    oxipng -q --nx --strip all "${png_file}"
     # First try to optimize with no reductions (8bpp depth preferred)
     #   then allow reductions (lower bit depths and other color modes)
     for reductions in '--nx -q' '-q'; do
       for level in {0..12}; do
-        oxipng ${reductions} --zc ${level} --filters 0-9 "$1"
+        oxipng ${reductions} -o6 -f 0-9 --zc ${level} "${png_file}"
       done
-      oxipng ${reductions} --zopfli --zi 255 --filters 0-9 "$1"
+      oxipng ${reductions} -o6 -f 0-9 --zopfli --zi 9000 --ziwi 300 "${png_file}"
       # Optionally compress with PNGOUT if available
       if command -v 'pngout' &> /dev/null; then
         for level in {0..3}; do
-          pngout -q -ks -kp -f6 -s${level} "$1"
+          pngout -q -ks -kp -f6 -s${level} "${png_file}" || true
         done
+        pngout -q "${png_file}" || true
       fi
     done
   fi
@@ -225,8 +227,8 @@ while (( "$#" )); do
     echo "${ERR} File size is outside the allowed range (67 B - 1 KiB)."
     exit 1
   fi
-  if ! oxipng -q --pretend --nx --nz "$1"; then
-    echo "${ERR} Not a valid PNG file. Check for image format issues."
+  if ! oxipng -q --dry-run --nx --nz --max-raw-size 10MB "$1"; then
+    echo "${ERR} Not a valid PNG file. Check image format." >&2
     exit 1
   fi
   # Ensure the artwork has the correct file permissions set
